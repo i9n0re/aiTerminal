@@ -266,7 +266,11 @@ export class Xterm {
         console.log('[ttyd] websocket connection opened');
 
         const { textEncoder, terminal, overlayAddon } = this;
-        const msg = JSON.stringify({ AuthToken: this.token, columns: terminal.cols, rows: terminal.rows });
+        const msg = JSON.stringify({
+            AuthToken: this.token,
+            columns: Math.max(terminal.cols, 1),
+            rows: Math.max(terminal.rows, 1),
+        });
         this.socket?.send(textEncoder.encode(msg));
 
         if (this.opened) {

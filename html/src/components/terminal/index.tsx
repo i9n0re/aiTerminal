@@ -52,9 +52,9 @@ export class Terminal extends Component<Props, State> {
             if (window.visualViewport) {
                 // 完全贴合当前可见视口 (实时更新，保证背景黑框不乱跑)
 
-                this.container.style.height = `${window.visualViewport.height}px`;
+                this.container.style.height = `${Math.max(1, window.visualViewport.height)}px`;
 
-                this.container.style.width = `${window.visualViewport.width}px`;
+                this.container.style.width = `${Math.max(1, window.visualViewport.width)}px`;
 
                 this.container.style.top = `${window.visualViewport.offsetTop}px`;
 
