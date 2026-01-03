@@ -1,0 +1,14 @@
+[2026/01/01 20:27:38:7742] N: ttyd 1.7.7-eccebc6 (libwebsockets 4.5.2-unknown)
+[2026/01/01 20:27:38:7792] N: tty configuration:
+[2026/01/01 20:27:38:7792] N:   start command: bash
+[2026/01/01 20:27:38:7793] N:   close signal: SIGHUP (1)
+[2026/01/01 20:27:38:7793] N:   terminal type: xterm-256color
+[2026/01/01 20:27:38:7793] W: The --writable option is not set, will start in readonly mode
+[2026/01/01 20:27:38:7817] N: lws_create_context: LWS: 4.5.2-unknown, NET CLI SRV H1 H2 WS SS-JSON-POL ConMon IPV6-off
+[2026/01/01 20:27:38:8404] N: elops_init_pt_uv:  Using foreign event loop...
+[2026/01/01 20:27:38:8437] W: callback_lws_sshd_demo: Can't open /etc/lws-test-sshd-server-key
+[2026/01/01 20:27:38:8554] W: ssh pvo "ops" is mandatory
+[2026/01/01 20:27:38:8556] W: callback_raw_test: Missing pvo "fifo-path", raw file fd testing disabled
+[2026/01/01 20:27:38:8556] W: handler_server_protocol_init: requires 'upload-dir' pvo
+[2026/01/01 20:27:39:0103] N: [vh|2|default|0.0.0.0|0.0.0.0|9999]: lws_socket_bind: source ads 0.0.0.0
+[2026/01/01 20:27:39:0105] N:  Listening on port: 9999
