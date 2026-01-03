@@ -123,6 +123,11 @@ export class Xterm {
     }
 
     @bind
+    public onTitleChange(callback: (title: string) => void): IDisposable {
+        return this.terminal.onTitleChange(callback);
+    }
+
+    @bind
     public sendFile(files: FileList) {
         this.zmodemAddon?.sendFile(files);
     }
