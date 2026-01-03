@@ -32,10 +32,12 @@ static const struct lws_protocols protocols[] = {{"http-only", callback_http, si
 
 #ifndef LWS_WITHOUT_EXTENSIONS
 // websocket extensions
+/*
 static const struct lws_extension extensions[] = {
     {"permessage-deflate", lws_extension_callback_pm_deflate, "permessage-deflate"},
     {"deflate-frame", lws_extension_callback_pm_deflate, "deflate_frame"},
     {NULL, NULL, NULL}};
+*/
 #endif
 
 #if LWS_LIBRARY_VERSION_NUMBER >= 4000000
@@ -325,7 +327,7 @@ int main(int argc, char **argv) {
   info.max_http_header_pool = 16;
   info.options = LWS_SERVER_OPTION_LIBUV | LWS_SERVER_OPTION_VALIDATE_UTF8 | LWS_SERVER_OPTION_DISABLE_IPV6;
 #ifndef LWS_WITHOUT_EXTENSIONS
-  info.extensions = extensions;
+  // info.extensions = extensions;
 #endif
   info.max_http_header_data = 65535;
 
