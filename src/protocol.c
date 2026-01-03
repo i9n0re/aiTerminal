@@ -220,12 +220,14 @@ int callback_tty(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
         return 1;
       }
 
+      /*
       if (server->check_origin && !check_host_origin(wsi)) {
         lwsl_warn(
             "refuse to serve WS client from different origin due to the "
             "--check-origin option.\n");
         return 1;
       }
+      */
       break;
 
     case LWS_CALLBACK_ESTABLISHED:
