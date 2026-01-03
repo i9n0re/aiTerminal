@@ -297,6 +297,10 @@ export class Terminal extends Component<Props, State> {
                         Tab
                     </button>
 
+                    <button style={buttonStyle} onClick={() => this.sendKey('\x06')}>
+                        Ctrl+F
+                    </button>
+
                     <button style={buttonStyle} onClick={() => this.sendKey('\x03')}>
                         Ctrl+C
                     </button>
