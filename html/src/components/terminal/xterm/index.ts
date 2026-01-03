@@ -258,7 +258,7 @@ export class Xterm {
         register(addEventListener(socket, 'open', this.onSocketOpen));
         register(addEventListener(socket, 'message', this.onSocketData as EventListener));
         register(addEventListener(socket, 'close', this.onSocketClose as EventListener));
-        register(addEventListener(socket, 'error', () => (this.doReconnect = false)));
+        register(addEventListener(socket, 'error', e => console.error('[ttyd] socket error:', e)));
     }
 
     @bind
