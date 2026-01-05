@@ -13,6 +13,7 @@ interface Props extends XtermOptions {
 interface State {
     modal: boolean;
     title: string;
+    toolbarVisible: boolean;
 }
 
 export class Terminal extends Component<Props, State> {
@@ -23,7 +24,7 @@ export class Terminal extends Component<Props, State> {
     constructor(props: Props) {
         super();
         this.xterm = new Xterm(props, this.showModal);
-        this.state = { modal: false, title: 'Terminal' };
+        this.state = { modal: false, title: 'Terminal', toolbarVisible: true };
     }
 
     async componentDidMount() {
@@ -165,7 +166,12 @@ export class Terminal extends Component<Props, State> {
         this.xterm.sendData(prefix + action);
     }
 
-    render({ id }: Props, { modal, title }: State) {
+    @bind
+    toggleToolbar() {
+        this.setState({ toolbarVisible: !this.state.toolbarVisible });
+    }
+
+    render({ id }: Props, { modal, title, toolbarVisible }: State) {
         // Watermark Style
 
         const watermarkStyle = {
@@ -269,41 +275,52 @@ export class Terminal extends Component<Props, State> {
                 <div style={watermarkStyle}>{title}</div>
 
                 <div style={toolbarStyle} className="quick-keys">
-                    <button style={buttonStyle} onClick={() => this.sendKey('\x1b')}>
-                        Esc
+                    <button
+                        style={{ ...buttonStyle, background: 'rgba(0, 150, 255, 0.3)' }}
+                        onClick={this.toggleToolbar}
+                    >
+                        {toolbarVisible ? '»' : '«'}
                     </button>
 
-                    <button style={buttonStyle} onClick={() => this.sendTmuxKey('c')}>
-                        New
-                    </button>
+                    {toolbarVisible && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <button style={buttonStyle} onClick={() => this.sendKey('\x1b')}>
+                                Esc
+                            </button>
 
-                    <button style={buttonStyle} onClick={() => this.sendTmuxKey(',')}>
-                        Rename
-                    </button>
+                            <button style={buttonStyle} onClick={() => this.sendTmuxKey('c')}>
+                                New
+                            </button>
 
-                    <button style={buttonStyle} onClick={() => this.sendTmuxKey('w')}>
-                        List
-                    </button>
+                            <button style={buttonStyle} onClick={() => this.sendTmuxKey(',')}>
+                                Rename
+                            </button>
 
-                    <button style={buttonStyle} onClick={() => this.sendTmuxKey('p')}>
-                        Prev
-                    </button>
+                            <button style={buttonStyle} onClick={() => this.sendTmuxKey('w')}>
+                                List
+                            </button>
 
-                    <button style={buttonStyle} onClick={() => this.sendTmuxKey('n')}>
-                        Next
-                    </button>
+                            <button style={buttonStyle} onClick={() => this.sendTmuxKey('p')}>
+                                Prev
+                            </button>
 
-                    <button style={buttonStyle} onClick={() => this.sendKey('\t')}>
-                        Tab
-                    </button>
+                            <button style={buttonStyle} onClick={() => this.sendTmuxKey('n')}>
+                                Next
+                            </button>
 
-                    <button style={buttonStyle} onClick={() => this.sendKey('\x06')}>
-                        Ctrl+F
-                    </button>
+                            <button style={buttonStyle} onClick={() => this.sendKey('\t')}>
+                                Tab
+                            </button>
 
-                    <button style={buttonStyle} onClick={() => this.sendKey('\x03')}>
-                        Ctrl+C
-                    </button>
+                            <button style={buttonStyle} onClick={() => this.sendKey('\x06')}>
+                                Ctrl+F
+                            </button>
+
+                            <button style={buttonStyle} onClick={() => this.sendKey('\x03')}>
+                                Ctrl+C
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 <Modal show={modal}>
