@@ -46,8 +46,8 @@ static lws_retry_bo_t retry = {
     .retry_ms_table = backoff_ms,
     .retry_ms_table_count = LWS_ARRAY_SIZE(backoff_ms),
     .conceal_count = LWS_ARRAY_SIZE(backoff_ms),
-    .secs_since_valid_ping = 30,
-    .secs_since_valid_hangup = 60,
+    .secs_since_valid_ping = 5,
+    .secs_since_valid_hangup = 12,
     .jitter_percent = 0,
 };
 #endif
@@ -539,7 +539,7 @@ int main(int argc, char **argv) {
   info.server_string = server_hdr;
 
 #if LWS_LIBRARY_VERSION_NUMBER < 4000000
-  info.ws_ping_pong_interval = 30;
+  info.ws_ping_pong_interval = 5;
 #else
   info.retry_and_idle_policy = &retry;
 #endif

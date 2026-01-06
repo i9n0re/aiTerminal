@@ -263,27 +263,29 @@ export class Xterm {
 
     @bind
     private onSocketOpen() {
-        console.log('[ttyd] websocket connection opened');
+        console.log('[ttyd] websocket connection opened, binaryType:', this.socket?.binaryType);
 
-        const { textEncoder, terminal, overlayAddon } = this;
-        const msg = JSON.stringify({
-            AuthToken: this.token,
-            columns: Math.max(terminal.cols, 1),
-            rows: Math.max(terminal.rows, 1),
-        });
-        this.socket?.send(textEncoder.encode(msg));
+        setTimeout(() => {
+            const { textEncoder, terminal, overlayAddon } = this;
+            const msg = JSON.stringify({
+                AuthToken: this.token,
+                columns: Math.max(terminal.cols, 1),
+                rows: Math.max(terminal.rows, 1),
+            });
+            this.socket?.send(textEncoder.encode(msg));
 
-        if (this.opened) {
-            terminal.reset();
-            terminal.options.disableStdin = false;
-            overlayAddon.showOverlay('Reconnected', 300);
-        } else {
-            this.opened = true;
-        }
+            if (this.opened) {
+                terminal.reset();
+                terminal.options.disableStdin = false;
+                overlayAddon.showOverlay('Reconnected', 300);
+            } else {
+                this.opened = true;
+            }
 
-        this.doReconnect = this.reconnect;
-        this.initListeners();
-        terminal.focus();
+            this.doReconnect = this.reconnect;
+            this.initListeners();
+            terminal.focus();
+        }, 100);
     }
 
     @bind

@@ -201,6 +201,9 @@ int callback_tty(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
 
   switch (reason) {
     case LWS_CALLBACK_FILTER_PROTOCOL_CONNECTION:
+      n = lws_hdr_copy(wsi, buf, sizeof(buf), WSI_TOKEN_GET_URI);
+      if (n > 0) lwsl_notice("filter connection for path: %s\n", buf);
+      
       if (server->once && server->client_count > 0) {
         lwsl_warn("refuse to serve WS client due to the --once option.\n");
         return 1;
@@ -209,14 +212,20 @@ int callback_tty(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
         lwsl_warn("refuse to serve WS client due to the --max-clients option.\n");
         return 1;
       }
-      if (!check_auth(wsi, pss)) return 1;
+      if (!check_auth(wsi, pss)) {
+          if (server->auth_header != NULL) {
+              lwsl_warn("refuse to serve WS client due to missing auth header\n");
+              return 1;
+          }
+          lwsl_notice("WS handshake missing Basic Auth header, expecting auth via JSON_DATA\n");
+      }
 
       n = lws_hdr_copy(wsi, pss->path, sizeof(pss->path), WSI_TOKEN_GET_URI);
 #if defined(LWS_ROLE_H2)
       if (n <= 0) n = lws_hdr_copy(wsi, pss->path, sizeof(pss->path), WSI_TOKEN_HTTP_COLON_PATH);
 #endif
       if (strncmp(pss->path, endpoints.ws, n) != 0) {
-        lwsl_warn("refuse to serve WS client for illegal ws path: %s\n", pss->path);
+        lwsl_warn("refuse to serve WS client for illegal ws path: %s (expected %s)\n", pss->path, endpoints.ws);
         return 1;
       }
 
@@ -336,10 +345,11 @@ int callback_tty(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
             struct json_object *o = NULL;
             if (json_object_object_get_ex(obj, "AuthToken", &o)) {
               const char *token = json_object_get_string(o);
-              if (token != NULL && !strcmp(token, server->credential))
+              if (token != NULL && !strcmp(token, server->credential)) {
                 pss->authenticated = true;
-              else
-                lwsl_warn("WS authentication failed with token: %s\n", token);
+              } else {
+                lwsl_warn("WS authentication failed via JSON_DATA. Token mismatch.\n");
+              }
             }
             if (!pss->authenticated) {
               json_object_put(obj);
