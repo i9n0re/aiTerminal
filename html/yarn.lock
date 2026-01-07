@@ -8524,10 +8524,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"preact@npm:^10.19.6":
-  version: 10.19.6
-  resolution: "preact@npm:10.19.6"
-  checksum: fe697a4ed6c79ec9997496ec735600744fa14495110da2ea40fa4e22429ad4e116dfe0ed786ab8c5c4fd233a479d1e4ac21ffb6748895ac80d3279c5d187b4c1
+"preact@npm:^10.28.1":
+  version: 10.28.1
+  resolution: "preact@npm:10.28.1"
+  checksum: ee1cbc52bfb53ed42f802de133f8c25ccaa95a9fadbc0b289b631a087d111f74ab2d54c957539815e2b2bac8f9daf41dd0951fde8c00269050dbbd8985dc6ab5
   languageName: node
   linkType: hard
 
@@ -10517,7 +10517,7 @@ __metadata:
     gulp-rename: ^2.0.0
     html-webpack-plugin: ^5.6.0
     mini-css-extract-plugin: ^2.8.1
-    preact: ^10.19.6
+    preact: ^10.28.1
     sass: ^1.71.1
     sass-loader: ^14.1.1
     scssfmt: ^1.0.7
