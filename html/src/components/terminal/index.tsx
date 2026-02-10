@@ -308,6 +308,14 @@ export class Terminal extends Component<Props, State> {
                                 Next
                             </button>
 
+                            <button style={buttonStyle} onClick={() => this.sendKey('\x1b[D')}>
+                                ←
+                            </button>
+
+                            <button style={buttonStyle} onClick={() => this.sendKey('\x1b[C')}>
+                                →
+                            </button>
+
                             <button style={buttonStyle} onClick={() => this.sendKey('\t')}>
                                 Tab
                             </button>
