@@ -309,10 +309,16 @@ export class Terminal extends Component<Props, State> {
                             </button>
 
                             <div style={{ display: 'flex', gap: '8px' }}>
-                                <button style={{ ...buttonStyle, minWidth: 'unset', flex: 1 }} onClick={() => this.sendKey('\x1b[D')}>
+                                <button
+                                    style={{ ...buttonStyle, minWidth: 'unset', flex: 1 }}
+                                    onClick={() => this.sendKey('\x1b[D')}
+                                >
                                     ←
                                 </button>
-                                <button style={{ ...buttonStyle, minWidth: 'unset', flex: 1 }} onClick={() => this.sendKey('\x1b[C')}>
+                                <button
+                                    style={{ ...buttonStyle, minWidth: 'unset', flex: 1 }}
+                                    onClick={() => this.sendKey('\x1b[C')}
+                                >
                                     →
                                 </button>
                             </div>
