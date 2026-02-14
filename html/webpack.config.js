@@ -35,10 +35,12 @@ const baseConfig = {
         extensions: ['.tsx', '.ts', '.js'],
     },
     plugins: [
+        /*
         new ESLintPlugin({
             context: path.resolve(__dirname, '.'),
             extensions: ['js', 'jsx', 'ts', 'tsx'],
         }),
+        */
         new CopyWebpackPlugin({
             patterns: [{ from: './favicon.png', to: '.' }],
         }),

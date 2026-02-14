@@ -327,18 +327,27 @@ int callback_tty(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
         case '4':
         case '5': { // TMUX_LIST or TMUX_SELECT command
           if (command == '5' && len > 1) {
-            char select_cmd[64];
-            char index_buf[16];
-            size_t index_len = len - 1 < 15 ? len - 1 : 15;
-            memcpy(index_buf, pss->buffer + 1, index_len);
-            index_buf[index_len] = '\0';
-            snprintf(select_cmd, sizeof(select_cmd), "tmux select-window -t %s 2>/dev/null", index_buf);
-            system(select_cmd);
+            char select_cmd[128];
+            char payload[64];
+            size_t payload_len = len - 1 < 63 ? len - 1 : 63;
+            memcpy(payload, pss->buffer + 1, payload_len);
+            payload[payload_len] = '\0'; // 修正：动态设置结束符，支持多位数索引
+            
+            char *win_idx = strtok(payload, ":");
+            char *pane_idx = strtok(NULL, ":");
+            if (win_idx && pane_idx) {
+              snprintf(select_cmd, sizeof(select_cmd), "tmux select-window -t %s 2>/dev/null; tmux select-pane -t %s 2>/dev/null", win_idx, pane_idx);
+              system(select_cmd);
+            }
           }
 
-          FILE *fp = popen("tmux list-windows -F \"__TMUX_DATA__:#{window_index}:#{window_name}:#{window_active}\" 2>/dev/null", "r");
+          // 增加 refresh-client 强制 tmux 重新声明其对终端的要求（如鼠标模式）
+          system("tmux refresh-client 2>/dev/null");
+
+          // Fetch all panes across all windows with their current command
+          FILE *fp = popen("tmux list-panes -a -F \"__TMUX_DATA__:#{window_index}:#{window_name}:#{window_active}:#{pane_index}:#{pane_current_command}:#{pane_active}\" 2>/dev/null", "r");
           if (fp != NULL) {
-            char line[256];
+            char line[512];
             char *full_msg = NULL;
             size_t total_len = 0;
 

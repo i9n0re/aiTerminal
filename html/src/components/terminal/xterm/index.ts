@@ -112,15 +112,14 @@ export class Xterm {
         this.webMouseMode = enabled;
         if (enabled) {
             // 物理重置终端的鼠标模式：发送关闭 X10, VT200, SGR 鼠标报告的转义序列
-            // \x1b[?1000l: 禁用正常跟踪
-            // \x1b[?1002l: 禁用按钮事件跟踪
-            // \x1b[?1003l: 禁用任意事件跟踪
-            // \x1b[?1006l: 禁用 SGR 模式
             this.terminal.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');
             console.log('[ttyd] Native mouse protocols disabled for web selection');
         } else {
-            // 恢复模式：通过刷新终端状态让 tmux 重新下发鼠标开启序列
+            // 核心修复：手动向 xterm.js 注入开启序列，强制其重新捕获鼠标
+            // 同时发送刷新指令，让后端配合 tmux 重新同步状态
+            this.terminal.write('\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h');
             this.sendCommand('4');
+            console.log('[ttyd] Native mouse protocols re-enabled');
         }
     }
 
