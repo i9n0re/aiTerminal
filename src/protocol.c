@@ -324,6 +324,44 @@ int callback_tty(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
             return -1;
           }
           break;
+        case '4':
+        case '5': { // TMUX_LIST or TMUX_SELECT command
+          if (command == '5' && len > 1) {
+            char select_cmd[64];
+            char index_buf[16];
+            size_t index_len = len - 1 < 15 ? len - 1 : 15;
+            memcpy(index_buf, pss->buffer + 1, index_len);
+            index_buf[index_len] = '\0';
+            snprintf(select_cmd, sizeof(select_cmd), "tmux select-window -t %s 2>/dev/null", index_buf);
+            system(select_cmd);
+          }
+
+          FILE *fp = popen("tmux list-windows -F \"__TMUX_DATA__:#{window_index}:#{window_name}:#{window_active}\" 2>/dev/null", "r");
+          if (fp != NULL) {
+            char line[256];
+            char *full_msg = NULL;
+            size_t total_len = 0;
+
+            while (fgets(line, sizeof(line), fp) != NULL) {
+              size_t n = strlen(line);
+              full_msg = xrealloc(full_msg, total_len + n + 1);
+              memcpy(full_msg + total_len, line, n);
+              total_len += n;
+              full_msg[total_len] = '\0';
+            }
+            pclose(fp);
+
+            if (full_msg != NULL) {
+              unsigned char *msg = xmalloc(LWS_PRE + 1 + total_len);
+              msg[LWS_PRE] = OUTPUT;
+              memcpy(&msg[LWS_PRE + 1], full_msg, total_len);
+              lws_write(wsi, &msg[LWS_PRE], 1 + total_len, LWS_WRITE_BINARY);
+              free(msg);
+              free(full_msg);
+            }
+          }
+          break;
+        }
         case RESIZE_TERMINAL:
           if (pss->process == NULL) break;
           json_object_put(

@@ -14,326 +14,246 @@ interface State {
     modal: boolean;
     title: string;
     toolbarVisible: boolean;
+    sidebarVisible: boolean;
+    windows: Array<{ index: number; name: string; active: boolean }>;
+    ready: boolean;
+    webMouseMode: boolean;
 }
 
 export class Terminal extends Component<Props, State> {
     private container: HTMLElement;
+    private terminalEl: HTMLElement;
     private xterm: Xterm;
     private titleDisposable: IDisposable | undefined;
 
     constructor(props: Props) {
         super();
         this.xterm = new Xterm(props, this.showModal);
-        this.state = { modal: false, title: 'Terminal', toolbarVisible: true };
+        this.state = {
+            modal: false,
+            title: 'Terminal',
+            toolbarVisible: true,
+            sidebarVisible: false,
+            windows: [],
+            ready: false,
+            webMouseMode: false,
+        };
     }
 
     async componentDidMount() {
+        if ('scrollRestoration' in window.history) {
+            window.history.scrollRestoration = 'manual';
+        }
+        window.scrollTo(0, 0);
+        document.body.style.overflow = 'hidden';
+        document.documentElement.style.overflow = 'hidden';
+
         await this.xterm.refreshToken();
-        this.xterm.open(this.container);
+        this.xterm.open(this.terminalEl);
+        
+        if (window.term && window.term.fit) {
+            window.term.fit();
+        }
+
         this.xterm.connect();
         this.initTouchScroll();
         this.initVisualViewport();
 
-        // Listen for title changes
         this.titleDisposable = this.xterm.onTitleChange(newTitle => {
-            if (newTitle) {
-                this.setState({ title: newTitle });
-            }
+            if (newTitle && newTitle !== this.state.title) this.setState({ title: newTitle });
         });
+
+        this.xterm.onServerData(data => {
+            if (data.includes('__TMUX_DATA__:')) {
+                this.parseWindowsFromData(data);
+                return true;
+            }
+            return false;
+        });
+
+        setTimeout(() => this.setState({ ready: true }), 50);
     }
+
+    @bind
+    toggleMouseMode() {
+        const newMode = !this.state.webMouseMode;
+        this.setState({ webMouseMode: newMode });
+        this.xterm.setWebMouseMode(newMode);
+    }
+
+    @bind
+    parseWindowsFromData(data: string) {
+        const regex = /__TMUX_DATA__:(\d+):([^:\r\n]+):([01])/g;
+        const foundWindows: State['windows'] = [];
+        let match;
+        while ((match = regex.exec(data)) !== null) {
+            foundWindows.push({ index: parseInt(match[1], 10), name: match[2], active: match[3] === '1' });
+        }
+        if (foundWindows.length > 0) {
+            this.setState({ windows: foundWindows.sort((a, b) => a.index - b.index) });
+        }
+    }
+
+    @bind refreshWindows() { this.xterm.sendCommand('4'); }
+    @bind selectWindow(index: number) { this.xterm.sendCommand('5', index.toString()); }
 
     initVisualViewport() {
         if (!window.visualViewport) return;
-
         let fitTimeout: ReturnType<typeof setTimeout>;
-
+        
         const updateLayout = () => {
-            if (!this.container) return;
-
-            if (window.visualViewport) {
-                // 完全贴合当前可见视口 (实时更新，保证背景黑框不乱跑)
-
-                this.container.style.height = `${Math.max(1, window.visualViewport.height)}px`;
-
-                this.container.style.width = `${Math.max(1, window.visualViewport.width)}px`;
-
-                this.container.style.top = `${window.visualViewport.offsetTop}px`;
-
-                this.container.style.left = `${window.visualViewport.offsetLeft}px`;
-            }
-
-            // Trigger fit addon to resize terminal rows
-
-            // Debounce fit to avoid flickering during keyboard animation
-
+            if (!this.container || !this.terminalEl) return;
+            
             if (window.term && window.term.fit) {
                 clearTimeout(fitTimeout);
-
+                // 仅针对窗口大小改变进行 fit
                 fitTimeout = setTimeout(() => {
                     window.term.fit();
-
-                    // Scroll to bottom after fit to ensure cursor is visible
-
-                    window.term.scrollToBottom();
-                }, 200);
+                }, 100);
             }
         };
 
         window.visualViewport.addEventListener('resize', updateLayout);
-
-        window.visualViewport.addEventListener('scroll', updateLayout);
-
-        // Initial call
-
         updateLayout();
     }
 
     initTouchScroll() {
         let touchStartY = 0;
-
-        const terminalEl = this.container.querySelector('.xterm-screen');
-
-        if (!terminalEl) return;
-
-        // Passive false to allow preventing default (scrolling body)
-
-        terminalEl.addEventListener(
-            'touchstart',
-
-            ((e: TouchEvent) => {
-                if (e.touches.length === 1) {
+        const el = this.terminalEl;
+        if (!el) return;
+        el.addEventListener('touchstart', ((e: TouchEvent) => {
+            if (e.touches.length === 1) touchStartY = e.touches[0].clientY;
+        }) as unknown as EventListener, { passive: false });
+        el.addEventListener('touchmove', ((e: TouchEvent) => {
+            if (e.touches.length === 1) {
+                const deltaY = touchStartY - e.touches[0].clientY;
+                if (Math.abs(deltaY) > 8) {
+                    const canvas = el.querySelector('.xterm-link-layer + canvas');
+                    if (canvas) {
+                        const wheelEvent = new WheelEvent('wheel', { deltaY: deltaY * (Math.abs(deltaY) > 30 ? 3 : 1), deltaMode: 0, bubbles: true, cancelable: true });
+                        canvas.dispatchEvent(wheelEvent);
+                    }
                     touchStartY = e.touches[0].clientY;
                 }
-            }) as unknown as EventListener,
-
-            { passive: false }
-        );
-
-        terminalEl.addEventListener(
-            'touchmove',
-
-            ((e: TouchEvent) => {
-                if (e.touches.length === 1) {
-                    const touchEndY = e.touches[0].clientY;
-                    const deltaY = touchStartY - touchEndY;
-
-                    // Sensitivity (Lowered threshold for smoother response)
-                    if (Math.abs(deltaY) > 8) {
-                        const canvas = this.container.querySelector('.xterm-link-layer + canvas');
-                        if (canvas) {
-                            // Acceleration for fast swipes
-                            const multiplier = Math.abs(deltaY) > 30 ? 3 : 1;
-
-                            const wheelEvent = new WheelEvent('wheel', {
-                                deltaY: deltaY * multiplier,
-                                deltaMode: 0, // Pixel
-                                bubbles: true,
-                                cancelable: true,
-                                clientX: e.touches[0].clientX,
-                                clientY: e.touches[0].clientY,
-                            });
-                            canvas.dispatchEvent(wheelEvent);
-                        }
-                        touchStartY = touchEndY;
-                    }
-                    // Prevent browser native scroll
-                    if (e.cancelable) e.preventDefault();
-                }
-            }) as unknown as EventListener,
-
-            { passive: false }
-        );
+                if (e.cancelable) e.preventDefault();
+            }
+        }) as unknown as EventListener, { passive: false });
     }
 
     componentWillUnmount() {
         this.xterm.dispose();
-        if (this.titleDisposable) {
-            this.titleDisposable.dispose();
-        }
+        if (this.titleDisposable) this.titleDisposable.dispose();
     }
+
+    @bind sendKey(key: string) { this.xterm.sendData(key); }
+    @bind sendTmuxKey(action: string) { this.xterm.sendData('\x02' + action); }
+    @bind toggleToolbar() { this.setState({ toolbarVisible: !this.state.toolbarVisible }); }
 
     @bind
-    sendKey(key: string) {
-        this.xterm.sendData(key);
+    toggleSidebar() {
+        this.setState({ sidebarVisible: !this.state.sidebarVisible }, () => {
+            if (this.state.sidebarVisible) {
+                this.refreshWindows();
+            }
+            // 关键：不再调用 fit()，侧边栏将作为 Overlay 浮现，不挤压终端
+        });
     }
 
-    @bind
-    sendTmuxKey(action: string) {
-        // Ctrl+B is \x02
-
-        const prefix = '\x02';
-
-        this.xterm.sendData(prefix + action);
-    }
-
-    @bind
-    toggleToolbar() {
-        this.setState({ toolbarVisible: !this.state.toolbarVisible });
-    }
-
-    render({ id }: Props, { modal, title, toolbarVisible }: State) {
-        // Watermark Style
-
-        const watermarkStyle = {
-            position: 'absolute',
-
-            top: '15%', // Moved to top
-
-            left: '50%',
-
-            transform: 'translate(-50%, -50%)',
-
-            fontSize: '15vw', // Responsive font size
-
-            fontWeight: '900',
-
-            color: 'rgba(255, 0, 0, 0.15)', // Lighter red
-
-            pointerEvents: 'none',
-
-            zIndex: 9999, // Above terminal text but click-through
-
-            whiteSpace: 'nowrap',
-
-            userSelect: 'none',
-
-            fontFamily: 'sans-serif',
-
-            textAlign: 'center',
-
-            width: '100%',
-
-            overflow: 'hidden',
-        };
-
-        // Side Toolbar
-
-        const toolbarStyle = {
-            position: 'fixed',
-
-            top: '50%', // Centered
-
-            right: '0',
-
-            transform: 'translateY(-50%)',
-
-            zIndex: 10000,
-
-            display: 'flex',
-
-            flexDirection: 'column',
-
-            gap: '8px',
-
-            padding: '12px 8px',
-
-            background: 'rgba(30, 30, 30, 0.7)',
-
-            borderTopLeftRadius: '12px',
-
-            borderBottomLeftRadius: '12px',
-
-            backdropFilter: 'blur(12px)',
-
-            webkitBackdropFilter: 'blur(12px)',
-
-            boxShadow: '-4px 0 16px rgba(0,0,0,0.4)',
-        };
-
-        const buttonStyle = {
-            background: 'rgba(255, 255, 255, 0.15)',
-
-            border: '1px solid rgba(255, 255, 255, 0.3)',
-
-            color: '#fff',
-
-            padding: '8px 12px', // Smaller
-
-            cursor: 'pointer',
-
-            borderRadius: '8px',
-
-            fontSize: '13px',
-
-            fontWeight: 'bold',
-
-            userSelect: 'none',
-
-            outline: 'none',
-
-            boxShadow: '0 3px 6px rgba(0,0,0,0.4)',
-
-            textAlign: 'center',
-
-            minWidth: '50px',
-        };
+    render({ id }: Props, { modal, title, toolbarVisible, sidebarVisible, windows, ready, webMouseMode }: State) {
+        const transitionStyle = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+        const sidebarWidth = '260px';
 
         return (
-            <div id={id} ref={c => (this.container = c as HTMLElement)}>
-                {/* Watermark Title */}
+            <div style={{ 
+                position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden', background: '#000',
+                opacity: ready ? 1 : 0, transition: 'opacity 0.2s ease-in'
+            }}>
+                {/* 终端区始终占据 100% 宽度，不再被挤压 */}
+                <div 
+                    ref={c => (this.container = c as HTMLElement)}
+                    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'hidden' }}
+                >
+                    <div style={{
+                        position: 'absolute', top: '15%', left: '50%', transform: 'translate(-50%, -50%)',
+                        fontSize: '15vw', fontWeight: '900', color: 'rgba(255, 0, 0, 0.15)',
+                        pointerEvents: 'none', zIndex: 9999, whiteSpace: 'nowrap',
+                        userSelect: 'none', textAlign: 'center', width: '100%', overflow: 'hidden',
+                    }}>{title}</div>
 
-                <div style={watermarkStyle}>{title}</div>
+                    <div id={id} ref={c => (this.terminalEl = c as HTMLElement)} style={{ width: '100%', height: '100%', overflow: 'hidden' }} />
+                </div>
 
-                <div style={toolbarStyle} className="quick-keys">
-                    <button
-                        style={{ ...buttonStyle, background: 'rgba(0, 150, 255, 0.3)' }}
-                        onClick={this.toggleToolbar}
-                    >
+                {/* 侧边栏改为 Overlay 模式，position: fixed */}
+                <div style={{
+                    position: 'fixed', top: 0, right: sidebarVisible ? '0' : `-${sidebarWidth}`,
+                    width: sidebarWidth, height: '100%', transition: transitionStyle,
+                    background: 'rgba(26, 26, 26, 0.95)', borderLeft: '1px solid #333',
+                    display: 'flex', flexDirection: 'column', overflow: 'hidden', color: '#ccc', zIndex: 10001,
+                    backdropFilter: 'blur(10px)', webkitBackdropFilter: 'blur(10px)',
+                    boxShadow: sidebarVisible ? '-4px 0 16px rgba(0,0,0,0.5)' : 'none',
+                }}>
+                    <div style={{ padding: '16px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '14px', fontWeight: 'bold', background: '#252525', whiteSpace: 'nowrap' }}>
+                        <span>Windows Manager</span>
+                        <button onClick={this.refreshWindows} style={{ background: 'none', border: 'none', color: '#007aff', cursor: 'pointer', fontSize: '18px' }}>↻</button>
+                    </div>
+
+                    <div style={{ padding: '12px 16px', background: '#202020', borderBottom: '1px solid #333', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: '11px', marginBottom: '8px', color: '#888' }}>MOUSE PRIORITY</div>
+                        <button onClick={this.toggleMouseMode} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: 'none', background: webMouseMode ? '#ff9500' : '#333', color: '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold', transition: 'all 0.2s' }}>
+                            {webMouseMode ? '✓ Web Selection' : 'Terminal (Tmux)'}
+                        </button>
+                    </div>
+
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+                        {windows.map(win => (
+                            <div key={win.index} onClick={() => this.selectWindow(win.index)} style={{
+                                padding: '12px 16px', margin: '4px 8px', borderRadius: '6px',
+                                background: win.active ? 'linear-gradient(90deg, #007aff, #005bb5)' : 'transparent',
+                                color: win.active ? '#fff' : '#ccc', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px',
+                                border: win.active ? 'none' : '1px solid #333', boxShadow: win.active ? '0 2px 10px rgba(0,122,255,0.5)' : 'none', transition: 'all 0.2s ease',
+                                whiteSpace: 'nowrap'
+                            }}>
+                                <span style={{ opacity: 0.5, fontSize: '11px', width: '15px' }}>{win.index}</span>
+                                <span style={{ fontWeight: win.active ? 'bold' : 'normal', flex: 1 }}>{win.name}</span>
+                                {win.active && <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#fff', boxShadow: '0 0 8px #fff' }} />}
+                            </div>
+                        ))}
+                    </div>
+                    <div style={{ padding: '16px', background: '#252525', borderTop: '1px solid #333', whiteSpace: 'nowrap' }}>
+                        <button onClick={() => this.sendTmuxKey('c')} style={{ background: '#28a745', border: 'none', color: '#fff', padding: '10px', width: '100%', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '8px' }}>+ New Window</button>
+                        <button onClick={() => this.sendTmuxKey('w')} style={{ background: '#6c757d', border: 'none', color: '#fff', padding: '10px', width: '100%', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>Tmux Menu (w)</button>
+                    </div>
+                </div>
+
+                {/* 快速工具栏位置跟随侧边栏移动 */}
+                <div style={{
+                    position: 'fixed', top: '50%', right: sidebarVisible ? sidebarWidth : '0',
+                    transform: 'translateY(-50%)', zIndex: 10000, display: 'flex',
+                    flexDirection: 'column', gap: '8px', padding: '12px 8px',
+                    background: 'rgba(30, 30, 30, 0.7)', borderTopLeftRadius: '12px',
+                    borderBottomLeftRadius: '12px', backdropFilter: 'blur(12px)',
+                    webkitBackdropFilter: 'blur(12px)', boxShadow: '-4px 0 16px rgba(0,0,0,0.4)',
+                    transition: transitionStyle,
+                }} className="quick-keys">
+                    <button style={{ background: 'rgba(0, 150, 255, 0.3)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={this.toggleSidebar}>
+                        {sidebarVisible ? '→' : '田'}
+                    </button>
+                    <button style={{ background: 'rgba(255, 255, 255, 0.1)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={this.toggleToolbar}>
                         {toolbarVisible ? '»' : '«'}
                     </button>
 
                     {toolbarVisible && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            <button style={buttonStyle} onClick={() => this.sendKey('\x1b')}>
-                                Esc
-                            </button>
-
-                            <button style={buttonStyle} onClick={() => this.sendTmuxKey('c')}>
-                                New
-                            </button>
-
-                            <button style={buttonStyle} onClick={() => this.sendTmuxKey(',')}>
-                                Rename
-                            </button>
-
-                            <button style={buttonStyle} onClick={() => this.sendTmuxKey('w')}>
-                                List
-                            </button>
-
-                            <button style={buttonStyle} onClick={() => this.sendTmuxKey('p')}>
-                                Prev
-                            </button>
-
-                            <button style={buttonStyle} onClick={() => this.sendTmuxKey('n')}>
-                                Next
-                            </button>
-
+                            <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={() => this.sendKey('\x1b')}>Esc</button>
+                            <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={() => this.sendTmuxKey('c')}>New</button>
+                            <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={() => this.sendTmuxKey(',')}>Rename</button>
                             <div style={{ display: 'flex', gap: '8px' }}>
-                                <button
-                                    style={{ ...buttonStyle, minWidth: 'unset', flex: 1 }}
-                                    onClick={() => this.sendKey('\x1b[D')}
-                                >
-                                    ←
-                                </button>
-                                <button
-                                    style={{ ...buttonStyle, minWidth: 'unset', flex: 1 }}
-                                    onClick={() => this.sendKey('\x1b[C')}
-                                >
-                                    →
-                                </button>
+                                <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', minWidth: 'unset', flex: 1 }} onClick={() => this.sendKey('\x1b[D')}>←</button>
+                                <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', minWidth: 'unset', flex: 1 }} onClick={() => this.sendKey('\x1b[C')}>→</button>
                             </div>
-
-                            <button style={buttonStyle} onClick={() => this.sendKey('\t')}>
-                                Tab
-                            </button>
-
-                            <button style={buttonStyle} onClick={() => this.sendKey('\x06')}>
-                                Ctrl+F
-                            </button>
-
-                            <button style={buttonStyle} onClick={() => this.sendKey('\x03')}>
-                                Ctrl+C
-                            </button>
+                            <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={() => this.sendKey('\t')}>Tab</button>
+                            <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={() => this.sendKey('\x06')}>Ctrl+F</button>
+                            <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={() => this.sendKey('\x03')}>Ctrl+C</button>
                         </div>
                     )}
                 </div>
@@ -348,13 +268,8 @@ export class Terminal extends Component<Props, State> {
         );
     }
 
-    @bind
-    showModal() {
-        this.setState({ modal: true });
-    }
-
-    @bind
-    sendFile(event: Event) {
+    @bind showModal() { this.setState({ modal: true }); }
+    @bind sendFile(event: Event) {
         this.setState({ modal: false });
         const files = (event.target as HTMLInputElement).files;
         if (files) this.xterm.sendFile(files);
