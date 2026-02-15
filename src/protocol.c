@@ -331,23 +331,17 @@ int callback_tty(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
             char payload[64];
             size_t payload_len = len - 1 < 63 ? len - 1 : 63;
             memcpy(payload, pss->buffer + 1, payload_len);
-            payload[payload_len] = '\0'; // 修正：动态设置结束符，支持多位数索引
-            
-            char *win_idx = strtok(payload, ":");
-            char *pane_idx = strtok(NULL, ":");
-            if (win_idx && pane_idx) {
-              snprintf(select_cmd, sizeof(select_cmd), "tmux select-window -t %s 2>/dev/null; tmux select-pane -t %s 2>/dev/null", win_idx, pane_idx);
-              system(select_cmd);
-            }
+            payload[payload_len] = '\0';
+            snprintf(select_cmd, sizeof(select_cmd), "tmux select-window -t %s 2>/dev/null", payload);
+            system(select_cmd);
           }
 
-          // 增加 refresh-client 强制 tmux 重新声明其对终端的要求（如鼠标模式）
           system("tmux refresh-client 2>/dev/null");
 
-          // Fetch all panes across all windows with their current command
-          FILE *fp = popen("tmux list-panes -a -F \"__TMUX_DATA__:#{window_index}:#{window_name}:#{window_active}:#{pane_index}:#{pane_current_command}:#{pane_active}\" 2>/dev/null", "r");
+          // 回归扁平化的窗口查询
+          FILE *fp = popen("tmux list-windows -F \"__TMUX_DATA__:#{window_index}:#{window_name}:#{window_active}\" 2>/dev/null", "r");
           if (fp != NULL) {
-            char line[512];
+            char line[256];
             char *full_msg = NULL;
             size_t total_len = 0;
 

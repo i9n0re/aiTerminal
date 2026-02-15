@@ -6,17 +6,10 @@ import type { IDisposable } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { Modal } from '../modal';
 
-interface Pane {
-    index: number;
-    command: string;
-    active: boolean;
-}
-
 interface WindowInfo {
     index: number;
     name: string;
     active: boolean;
-    panes: Pane[];
 }
 
 interface Props extends XtermOptions {
@@ -74,7 +67,7 @@ export class Terminal extends Component<Props, State> {
 
         this.xterm.onServerData(data => {
             if (data.includes('__TMUX_DATA__:')) {
-                this.parseNestedData(data);
+                this.parseWindowsData(data);
                 return true;
             }
             return false;
@@ -84,40 +77,24 @@ export class Terminal extends Component<Props, State> {
     }
 
     @bind
-    parseNestedData(data: string) {
-        // 格式: __TMUX_DATA__:W_IDX:W_NAME:W_ACTIVE:P_IDX:P_CMD:P_ACTIVE
-        const regex = /__TMUX_DATA__:(\d+):([^:]+):([01]):(\d+):([^:\r\n]+):([01])/g;
-        const windowMap = new Map<number, WindowInfo>();
+    parseWindowsData(data: string) {
+        const regex = /__TMUX_DATA__:(\d+):([^:\r\n]+):([01])/g;
+        const foundWindows: WindowInfo[] = [];
         let match;
-
         while ((match = regex.exec(data)) !== null) {
-            const wIdx = parseInt(match[1], 10);
-            const wName = match[2];
-            const wActive = match[3] === '1';
-            const pIdx = parseInt(match[4], 10);
-            const pCmd = match[5];
-            const pActive = match[6] === '1';
-
-            if (!windowMap.has(wIdx)) {
-                windowMap.set(wIdx, { index: wIdx, name: wName, active: wActive, panes: [] });
-            }
-            windowMap.get(wIdx)!.panes.push({ index: pIdx, command: pCmd, active: pActive });
+            foundWindows.push({
+                index: parseInt(match[1], 10),
+                name: match[2],
+                active: match[3] === '1',
+            });
         }
-
-        const sortedWindows = Array.from(windowMap.values()).sort((a, b) => a.index - b.index);
-        sortedWindows.forEach(w => w.panes.sort((a, b) => a.index - b.index));
-        
-        console.log('[ttyd] Parsed nested tmux structure:', sortedWindows);
-        this.setState({ windows: sortedWindows });
+        if (foundWindows.length > 0) {
+            this.setState({ windows: foundWindows.sort((a, b) => a.index - b.index) });
+        }
     }
 
     @bind refreshWindows() { this.xterm.sendCommand('4'); }
-    
-    @bind 
-    selectPane(wIdx: number, pIdx: number) {
-        console.log(`[ttyd] Switching to Window ${wIdx}, Pane ${pIdx}`);
-        this.xterm.sendCommand('5', `${wIdx}:${pIdx}`);
-    }
+    @bind selectWindow(index: number) { this.xterm.sendCommand('5', index.toString()); }
 
     @bind
     toggleMouseMode() {
@@ -211,7 +188,7 @@ export class Terminal extends Component<Props, State> {
                     boxShadow: sidebarVisible ? '-4px 0 16px rgba(0,0,0,0.5)' : 'none',
                 }}>
                     <div style={{ padding: '16px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '14px', fontWeight: 'bold', background: '#252525', whiteSpace: 'nowrap' }}>
-                        <span>Sessions Explorer</span>
+                        <span>Windows Manager</span>
                         <button onClick={this.refreshWindows} style={{ background: 'none', border: 'none', color: '#007aff', cursor: 'pointer', fontSize: '18px' }}>↻</button>
                     </div>
 
@@ -222,47 +199,29 @@ export class Terminal extends Component<Props, State> {
                     </div>
 
                     <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+                        {windows.length === 0 && (
+                            <div style={{ padding: '20px', textAlign: 'center', fontSize: '12px', color: '#666' }}>
+                                <div>No windows detected</div>
+                                <div style={{ marginTop: '8px', opacity: 0.7 }}>Click ↻ to sync</div>
+                            </div>
+                        )}
                         {windows.map(win => (
-                            <div key={win.index} style={{ marginBottom: '12px' }}>
-                                {/* Window Header */}
-                                <div style={{ 
-                                    padding: '8px 16px', background: '#2a2a2a', fontSize: '11px', color: '#888', 
-                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                    borderLeft: win.active ? '3px solid #007aff' : 'none'
-                                }}>
-                                    <span>WINDOW {win.index}: {win.name.toUpperCase()}</span>
-                                    {win.active && <span style={{ color: '#007aff' }}>ACTIVE</span>}
-                                </div>
-                                
-                                {/* Panes (Sessions) */}
-                                {win.panes.map(pane => (
-                                    <div 
-                                        key={pane.index} 
-                                        onClick={() => this.selectPane(win.index, pane.index)}
-                                        style={{
-                                            padding: '10px 16px 10px 28px', margin: '2px 8px', borderRadius: '6px',
-                                            background: pane.active ? 'linear-gradient(90deg, #007aff, #005bb5)' : 'transparent',
-                                            color: pane.active ? '#fff' : '#ccc', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px',
-                                            transition: 'all 0.2s ease', border: pane.active ? 'none' : '1px solid transparent'
-                                        }}
-                                    >
-                                        <div style={{ 
-                                            width: '8px', height: '8px', borderRadius: '50%', 
-                                            background: pane.active ? '#fff' : (pane.command.includes('python') || pane.command.includes('gemini') ? '#28a745' : '#555') 
-                                        }} />
-                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                            <span style={{ fontWeight: pane.active ? 'bold' : 'normal' }}>Session {pane.index}</span>
-                                            <span style={{ fontSize: '10px', opacity: 0.6 }}>Running: {pane.command}</span>
-                                        </div>
-                                    </div>
-                                ))}
+                            <div key={win.index} onClick={() => this.selectWindow(win.index)} style={{
+                                padding: '12px 16px', margin: '4px 8px', borderRadius: '6px',
+                                background: win.active ? 'linear-gradient(90deg, #007aff, #005bb5)' : 'transparent',
+                                color: win.active ? '#fff' : '#ccc', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px',
+                                border: win.active ? 'none' : '1px solid #333', boxShadow: win.active ? '0 2px 10px rgba(0,122,255,0.5)' : 'none', transition: 'all 0.2s ease',
+                                whiteSpace: 'nowrap'
+                            }}>
+                                <span style={{ opacity: 0.5, fontSize: '11px', width: '15px' }}>{win.index}</span>
+                                <span style={{ fontWeight: win.active ? 'bold' : 'normal', flex: 1 }}>{win.name}</span>
+                                {win.active && <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#fff', boxShadow: '0 0 8px #fff' }} />}
                             </div>
                         ))}
                     </div>
-                    
                     <div style={{ padding: '16px', background: '#252525', borderTop: '1px solid #333', whiteSpace: 'nowrap' }}>
                         <button onClick={() => this.sendTmuxKey('c')} style={{ background: '#28a745', border: 'none', color: '#fff', padding: '10px', width: '100%', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '8px' }}>+ New Window</button>
-                        <button onClick={() => this.sendTmuxKey('w')} style={{ background: '#6c757d', border: 'none', color: '#fff', padding: '10px', width: '100%', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>Interactive Menu</button>
+                        <button onClick={() => this.sendTmuxKey('w')} style={{ background: '#6c757d', border: 'none', color: '#fff', padding: '10px', width: '100%', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>Tmux Menu (w)</button>
                     </div>
                 </div>
 
@@ -287,8 +246,9 @@ export class Terminal extends Component<Props, State> {
                             <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={() => this.sendKey('\x1b')}>Esc</button>
                             <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={() => this.sendTmuxKey('c')}>New</button>
                             <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={() => this.sendTmuxKey(',')}>Rename</button>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', minWidth: 'unset', flex: 1 }} onClick={() => this.sendKey('\x1b[D')}>←</button>
+                                                            <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={() => this.sendTmuxKey('p')}>Prev</button>
+                                                            <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={() => this.sendTmuxKey('n')}>Next</button>
+                                                            <div style={{ display: 'flex', gap: '8px' }}>                                <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', minWidth: 'unset', flex: 1 }} onClick={() => this.sendKey('\x1b[D')}>←</button>
                                 <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', minWidth: 'unset', flex: 1 }} onClick={() => this.sendKey('\x1b[C')}>→</button>
                             </div>
                             <button style={{ background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '8px 12px', cursor: 'pointer', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }} onClick={() => this.sendKey('\t')}>Tab</button>
