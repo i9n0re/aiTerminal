@@ -1,0 +1,5 @@
+# This directory is a Syncthing folder marker.
+# Do not delete.
+
+folderID: zktkm-nutqs
+created: 2026-02-24T10:25:14+08:00

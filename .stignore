@@ -1,0 +1,12 @@
+.idea
+.venv
+.git
+html/.yarn
+nohup.out
+html/package.json
+html/.yarnrc.yml
+html/yarn.lock
+build
+node_modules
+html/dist
+src/html.h
