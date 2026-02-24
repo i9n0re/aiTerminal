@@ -1287,12 +1287,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@xterm/addon-image@npm:^0.8.0":
-  version: 0.8.0
-  resolution: "@xterm/addon-image@npm:0.8.0"
-  peerDependencies:
-    "@xterm/xterm": ^5.2.0
-  checksum: 852ea4482e0272bf74a505a9b54429a7d60775f0ee0b86bf207b5ea52a8f2e83ce2870415129fca82710a63a7ca3e233564d5dd050ebc49512d1d0113e5b5b1b
+"@xterm/addon-image@npm:^0.9.0":
+  version: 0.9.0
+  resolution: "@xterm/addon-image@npm:0.9.0"
+  checksum: da16e64a58547a194b941c1642995ab5f374ef19777aa523db9d1a21ce74cb75a5ec39900a266ac97a28e09d2ceee3abaf413c547a49f517f34f4f53523501e4
   languageName: node
   linkType: hard
 
@@ -10495,7 +10493,7 @@ __metadata:
     "@xterm/addon-canvas": ^0.7.0
     "@xterm/addon-clipboard": ^0.1.0
     "@xterm/addon-fit": ^0.10.0
-    "@xterm/addon-image": ^0.8.0
+    "@xterm/addon-image": ^0.9.0
     "@xterm/addon-unicode11": ^0.8.0
     "@xterm/addon-web-links": ^0.11.0
     "@xterm/addon-webgl": ^0.18.0
