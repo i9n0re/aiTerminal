@@ -24,13 +24,62 @@ interface State {
     windows: WindowInfo[];
     ready: boolean;
     webMouseMode: boolean;
+    viewportHeight: number;
+    viewportWidth: number;
+    viewportOffsetTop: number;
+    viewportOffsetLeft: number;
+    keyboardInset: number;
 }
+
+interface VirtualKeyboardApi extends EventTarget {
+    overlaysContent: boolean;
+    boundingRect: DOMRectReadOnly;
+}
+
+interface NavigatorWithVirtualKeyboard extends Navigator {
+    virtualKeyboard?: VirtualKeyboardApi;
+}
+
+function getViewportMetrics() {
+    const viewport = window.visualViewport;
+    const height = viewport ? Math.min(viewport.height, window.innerHeight) : window.innerHeight;
+    const width = viewport ? Math.min(viewport.width, window.innerWidth) : window.innerWidth;
+    return {
+        viewportHeight: Math.round(height),
+        viewportWidth: Math.round(width),
+        viewportOffsetTop: Math.round(viewport ? viewport.offsetTop : 0),
+        viewportOffsetLeft: Math.round(viewport ? viewport.offsetLeft : 0),
+    };
+}
+
+function getVirtualKeyboardInset() {
+    const keyboard = (navigator as NavigatorWithVirtualKeyboard).virtualKeyboard;
+    const rect = keyboard?.boundingRect;
+    if (!rect) return 0;
+    return Math.max(0, Math.round(Math.min(rect.height, window.innerHeight - rect.y)));
+}
+
+function isMobileViewport() {
+    return window.matchMedia('(pointer: coarse)').matches && window.innerWidth <= 900;
+}
+
+const TERMINAL_BACKGROUND = '#000';
 
 export class Terminal extends Component<Props, State> {
     private container: HTMLElement;
     private terminalEl: HTMLElement;
     private xterm: Xterm;
     private titleDisposable: IDisposable | undefined;
+    private viewportResizeObserver: ResizeObserver | undefined;
+    private viewportFitTimeout: ReturnType<typeof setTimeout> | undefined;
+    private viewportAnimationFrame: number | undefined;
+    private keyboardFallbackTimeout: ReturnType<typeof setTimeout> | undefined;
+    private keyboardFitTimeouts: ReturnType<typeof setTimeout>[] = [];
+    private maxObservedViewportHeight = getViewportMetrics().viewportHeight;
+    private terminalFocused = false;
+    private lastTerminalPointerTime = 0;
+    private keyboardOpenRequestTime = 0;
+    private hadKeyboardViewportSignal = false;
 
     constructor(props: Props) {
         super();
@@ -43,6 +92,8 @@ export class Terminal extends Component<Props, State> {
             windows: [],
             ready: false,
             webMouseMode: false,
+            keyboardInset: 0,
+            ...getViewportMetrics(),
         };
     }
 
@@ -60,6 +111,7 @@ export class Terminal extends Component<Props, State> {
         this.xterm.connect();
         this.initTouchScroll();
         this.initVisualViewport();
+        this.initKeyboardAvoidance();
 
         this.titleDisposable = this.xterm.onTitleChange(newTitle => {
             if (newTitle && newTitle !== this.state.title) this.setState({ title: newTitle });
@@ -104,19 +156,171 @@ export class Terminal extends Component<Props, State> {
     }
 
     initVisualViewport() {
-        if (!window.visualViewport) return;
-        let fitTimeout: ReturnType<typeof setTimeout>;
-        const updateLayout = () => {
+        const viewport = window.visualViewport;
+        if (viewport) {
+            viewport.addEventListener('resize', this.updateViewportLayout);
+            viewport.addEventListener('scroll', this.updateViewportLayout);
+        }
+        window.addEventListener('resize', this.updateViewportLayout);
+
+        if ('ResizeObserver' in window) {
+            this.viewportResizeObserver = new ResizeObserver(this.updateViewportLayout);
+            this.viewportResizeObserver.observe(this.container);
+        }
+        this.updateViewportLayout();
+    }
+
+    @bind
+    updateViewportLayout() {
+        if (this.viewportAnimationFrame) {
+            cancelAnimationFrame(this.viewportAnimationFrame);
+        }
+
+        this.viewportAnimationFrame = requestAnimationFrame(() => {
+            this.viewportAnimationFrame = undefined;
             if (!this.container || !this.terminalEl) return;
-            if (window.term && window.term.fit) {
-                clearTimeout(fitTimeout);
-                fitTimeout = setTimeout(() => window.term.fit(), 300);
+
+            const nextMetrics = getViewportMetrics();
+            if (!this.terminalFocused || nextMetrics.viewportHeight > this.maxObservedViewportHeight) {
+                this.maxObservedViewportHeight = nextMetrics.viewportHeight;
             }
-        };
-        window.visualViewport.addEventListener('resize', updateLayout);
-        const resizeObserver = new ResizeObserver(updateLayout);
-        resizeObserver.observe(this.container);
-        updateLayout();
+            this.updateKeyboardCloseState(nextMetrics.viewportHeight);
+
+            const hasChanged =
+                nextMetrics.viewportHeight !== this.state.viewportHeight ||
+                nextMetrics.viewportWidth !== this.state.viewportWidth ||
+                nextMetrics.viewportOffsetTop !== this.state.viewportOffsetTop ||
+                nextMetrics.viewportOffsetLeft !== this.state.viewportOffsetLeft;
+
+            if (hasChanged) {
+                this.setState(nextMetrics);
+            }
+
+            this.fitTerminal(120);
+
+            window.scrollTo(0, 0);
+        });
+    }
+
+    initKeyboardAvoidance() {
+        const keyboard = (navigator as NavigatorWithVirtualKeyboard).virtualKeyboard;
+        if (keyboard) {
+            try {
+                keyboard.overlaysContent = false;
+            } catch {
+                // Some browsers expose the API without allowing runtime policy changes.
+            }
+            keyboard.addEventListener('geometrychange', this.updateVirtualKeyboardInset);
+            this.updateVirtualKeyboardInset();
+        }
+
+        this.terminalEl.addEventListener('focusin', this.onTerminalFocusIn);
+        this.terminalEl.addEventListener('focusout', this.onTerminalFocusOut);
+        this.terminalEl.addEventListener('pointerup', this.onTerminalPointer);
+        this.terminalEl.addEventListener('touchend', this.onTerminalPointer);
+    }
+
+    @bind
+    updateVirtualKeyboardInset() {
+        const keyboardInset = getVirtualKeyboardInset();
+        if (keyboardInset > 0) {
+            this.hadKeyboardViewportSignal = true;
+        }
+        this.setKeyboardInset(keyboardInset);
+        this.scheduleKeyboardFits();
+    }
+
+    @bind
+    onTerminalPointer() {
+        this.lastTerminalPointerTime = Date.now();
+        this.keyboardOpenRequestTime = this.lastTerminalPointerTime;
+        this.terminalFocused = true;
+        if (window.term && window.term.focus) window.term.focus();
+        this.scheduleKeyboardFits();
+        this.scheduleKeyboardFallback(260);
+    }
+
+    @bind
+    onTerminalFocusIn() {
+        this.terminalFocused = true;
+        this.scheduleKeyboardFits();
+        if (Date.now() - this.lastTerminalPointerTime < 1000) {
+            this.keyboardOpenRequestTime = Date.now();
+            this.scheduleKeyboardFallback(180);
+        }
+    }
+
+    @bind
+    onTerminalFocusOut() {
+        this.terminalFocused = false;
+        this.keyboardOpenRequestTime = 0;
+        this.hadKeyboardViewportSignal = false;
+        this.clearKeyboardFallback();
+        this.setKeyboardInset(0);
+        this.scheduleKeyboardFits();
+    }
+
+    setKeyboardInset(keyboardInset: number) {
+        if (keyboardInset === this.state.keyboardInset) return;
+        this.setState({ keyboardInset }, () => this.fitTerminal(80));
+    }
+
+    getMobileKeyboardInsetEstimate() {
+        const keyboardInset = getVirtualKeyboardInset();
+        if (keyboardInset > 0) return keyboardInset;
+
+        const metrics = getViewportMetrics();
+        const viewportShrink = Math.max(0, this.maxObservedViewportHeight - metrics.viewportHeight);
+        if (viewportShrink > 80) return viewportShrink;
+
+        return Math.round(this.maxObservedViewportHeight * 0.42);
+    }
+
+    updateKeyboardCloseState(viewportHeight: number) {
+        const viewportShrink = Math.max(0, this.maxObservedViewportHeight - viewportHeight);
+        const keyboardInset = getVirtualKeyboardInset();
+        if (viewportShrink > 80 || keyboardInset > 0) {
+            this.hadKeyboardViewportSignal = true;
+            return;
+        }
+
+        const recentlyRequestedKeyboard = Date.now() - this.keyboardOpenRequestTime < 900;
+        if (this.state.keyboardInset > 0 && this.hadKeyboardViewportSignal && !recentlyRequestedKeyboard) {
+            this.hadKeyboardViewportSignal = false;
+            this.setKeyboardInset(0);
+        }
+    }
+
+    scheduleKeyboardFits() {
+        this.keyboardFitTimeouts.forEach(timeout => clearTimeout(timeout));
+        this.keyboardFitTimeouts = [40, 140, 320, 700].map(delay =>
+            setTimeout(() => {
+                this.updateViewportLayout();
+                this.fitTerminal(0);
+            }, delay)
+        );
+    }
+
+    scheduleKeyboardFallback(delay = 220) {
+        this.clearKeyboardFallback();
+        if (!isMobileViewport()) return;
+
+        this.keyboardFallbackTimeout = setTimeout(() => {
+            if (!this.terminalFocused) return;
+            this.setKeyboardInset(this.getMobileKeyboardInsetEstimate());
+            this.scheduleKeyboardFits();
+        }, delay);
+    }
+
+    clearKeyboardFallback() {
+        if (this.keyboardFallbackTimeout) clearTimeout(this.keyboardFallbackTimeout);
+        this.keyboardFallbackTimeout = undefined;
+    }
+
+    fitTerminal(delay: number) {
+        if (!window.term || !window.term.fit) return;
+        if (this.viewportFitTimeout) clearTimeout(this.viewportFitTimeout);
+        this.viewportFitTimeout = setTimeout(() => window.term.fit(), delay);
     }
 
     initTouchScroll() {
@@ -143,6 +347,25 @@ export class Terminal extends Component<Props, State> {
     }
 
     componentWillUnmount() {
+        const viewport = window.visualViewport;
+        if (viewport) {
+            viewport.removeEventListener('resize', this.updateViewportLayout);
+            viewport.removeEventListener('scroll', this.updateViewportLayout);
+        }
+        window.removeEventListener('resize', this.updateViewportLayout);
+        const keyboard = (navigator as NavigatorWithVirtualKeyboard).virtualKeyboard;
+        if (keyboard) keyboard.removeEventListener('geometrychange', this.updateVirtualKeyboardInset);
+        if (this.terminalEl) {
+            this.terminalEl.removeEventListener('focusin', this.onTerminalFocusIn);
+            this.terminalEl.removeEventListener('focusout', this.onTerminalFocusOut);
+            this.terminalEl.removeEventListener('pointerup', this.onTerminalPointer);
+            this.terminalEl.removeEventListener('touchend', this.onTerminalPointer);
+        }
+        if (this.viewportResizeObserver) this.viewportResizeObserver.disconnect();
+        if (this.viewportFitTimeout) clearTimeout(this.viewportFitTimeout);
+        if (this.viewportAnimationFrame) cancelAnimationFrame(this.viewportAnimationFrame);
+        this.clearKeyboardFallback();
+        this.keyboardFitTimeouts.forEach(timeout => clearTimeout(timeout));
         this.xterm.dispose();
         if (this.titleDisposable) this.titleDisposable.dispose();
     }
@@ -156,13 +379,38 @@ export class Terminal extends Component<Props, State> {
         });
     }
 
-    render({ id }: Props, { modal, title, toolbarVisible, sidebarVisible, windows, ready, webMouseMode }: State) {
+    render(
+        { id }: Props,
+        {
+            modal,
+            title,
+            toolbarVisible,
+            sidebarVisible,
+            windows,
+            ready,
+            webMouseMode,
+            viewportHeight,
+            viewportWidth,
+            viewportOffsetTop,
+            viewportOffsetLeft,
+            keyboardInset,
+        }: State
+    ) {
         const transitionStyle = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
         const sidebarWidth = '260px';
+        const viewportShrink = Math.max(0, this.maxObservedViewportHeight - viewportHeight);
+        const extraKeyboardInset = Math.max(0, keyboardInset - viewportShrink);
+        const terminalHeight = Math.max(160, viewportHeight - extraKeyboardInset);
 
         return (
             <div style={{ 
-                position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden', background: '#000',
+                position: 'fixed',
+                top: `${viewportOffsetTop}px`,
+                left: `${viewportOffsetLeft}px`,
+                width: `${viewportWidth}px`,
+                height: `${terminalHeight}px`,
+                overflow: 'hidden',
+                background: TERMINAL_BACKGROUND,
                 opacity: ready ? 1 : 0, transition: 'opacity 0.2s ease-in'
             }}>
                 <div 
@@ -180,7 +428,7 @@ export class Terminal extends Component<Props, State> {
                 </div>
 
                 <div style={{
-                    position: 'fixed', top: 0, right: sidebarVisible ? '0' : `-${sidebarWidth}`,
+                    position: 'absolute', top: 0, right: sidebarVisible ? '0' : `-${sidebarWidth}`,
                     width: sidebarWidth, height: '100%', transition: transitionStyle,
                     background: 'rgba(26, 26, 26, 0.95)', borderLeft: '1px solid #333',
                     display: 'flex', flexDirection: 'column', overflow: 'hidden', color: '#ccc', zIndex: 10001,
@@ -226,7 +474,7 @@ export class Terminal extends Component<Props, State> {
                 </div>
 
                 <div style={{
-                    position: 'fixed', top: '50%', right: sidebarVisible ? sidebarWidth : '0',
+                    position: 'absolute', top: '50%', right: sidebarVisible ? sidebarWidth : '0',
                     transform: 'translateY(-50%)', zIndex: 10000, display: 'flex',
                     flexDirection: 'column', gap: '8px', padding: '12px 8px',
                     background: 'rgba(30, 30, 30, 0.7)', borderTopLeftRadius: '12px',
