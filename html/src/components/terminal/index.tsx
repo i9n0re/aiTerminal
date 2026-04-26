@@ -63,6 +63,19 @@ function isMobileViewport() {
     return window.matchMedia('(pointer: coarse)').matches && window.innerWidth <= 900;
 }
 
+function isEditableElement(target: EventTarget | null) {
+    const el = target as HTMLElement | null;
+    if (!el) return false;
+    if (el.isContentEditable) return true;
+
+    const tagName = el.tagName;
+    if (tagName === 'TEXTAREA' || tagName === 'SELECT') return true;
+    if (tagName !== 'INPUT') return false;
+
+    const input = el as HTMLInputElement;
+    return !input.readOnly && !input.disabled && input.type !== 'button' && input.type !== 'submit';
+}
+
 const TERMINAL_BACKGROUND = '#000';
 
 export class Terminal extends Component<Props, State> {
@@ -80,6 +93,7 @@ export class Terminal extends Component<Props, State> {
     private lastTerminalPointerTime = 0;
     private keyboardOpenRequestTime = 0;
     private hadKeyboardViewportSignal = false;
+    private terminalTouchMoved = false;
 
     constructor(props: Props) {
         super();
@@ -112,6 +126,7 @@ export class Terminal extends Component<Props, State> {
         this.initTouchScroll();
         this.initVisualViewport();
         this.initKeyboardAvoidance();
+        window.addEventListener('keydown', this.onGlobalKeyDown, true);
 
         this.titleDisposable = this.xterm.onTitleChange(newTitle => {
             if (newTitle && newTitle !== this.state.title) this.setState({ title: newTitle });
@@ -130,19 +145,17 @@ export class Terminal extends Component<Props, State> {
 
     @bind
     parseWindowsData(data: string) {
-        const regex = /__TMUX_DATA__:(\d+):([^:\r\n]+):([01])/g;
         const foundWindows: WindowInfo[] = [];
-        let match;
-        while ((match = regex.exec(data)) !== null) {
+        data.split(/\r?\n/).forEach(line => {
+            const match = line.match(/^__TMUX_DATA__:(\d+):(.*):([01])$/);
+            if (!match) return;
             foundWindows.push({
                 index: parseInt(match[1], 10),
                 name: match[2],
                 active: match[3] === '1',
             });
-        }
-        if (foundWindows.length > 0) {
-            this.setState({ windows: foundWindows.sort((a, b) => a.index - b.index) });
-        }
+        });
+        this.setState({ windows: foundWindows.sort((a, b) => a.index - b.index) });
     }
 
     @bind refreshWindows() { this.xterm.sendCommand('4'); }
@@ -221,6 +234,15 @@ export class Terminal extends Component<Props, State> {
     }
 
     @bind
+    onGlobalKeyDown(event: KeyboardEvent) {
+        if (event.key !== 'Backspace' || event.defaultPrevented || isEditableElement(event.target)) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        if (window.term && window.term.focus) window.term.focus();
+    }
+
+    @bind
     updateVirtualKeyboardInset() {
         const keyboardInset = getVirtualKeyboardInset();
         if (keyboardInset > 0) {
@@ -231,7 +253,19 @@ export class Terminal extends Component<Props, State> {
     }
 
     @bind
-    onTerminalPointer() {
+    onTerminalPointer(event: Event) {
+        if ('pointerType' in event && (event as PointerEvent).pointerType === 'touch') {
+            return;
+        }
+
+        if (event.type === 'touchend' && this.terminalTouchMoved) {
+            this.terminalTouchMoved = false;
+            this.keyboardOpenRequestTime = 0;
+            this.clearKeyboardFallback();
+            return;
+        }
+
+        this.terminalTouchMoved = false;
         this.lastTerminalPointerTime = Date.now();
         this.keyboardOpenRequestTime = this.lastTerminalPointerTime;
         this.terminalFocused = true;
@@ -304,9 +338,12 @@ export class Terminal extends Component<Props, State> {
     scheduleKeyboardFallback(delay = 220) {
         this.clearKeyboardFallback();
         if (!isMobileViewport()) return;
+        const requestTime = this.keyboardOpenRequestTime;
 
         this.keyboardFallbackTimeout = setTimeout(() => {
             if (!this.terminalFocused) return;
+            if (!requestTime || requestTime !== this.keyboardOpenRequestTime) return;
+            if (Date.now() - requestTime > 900) return;
             this.setKeyboardInset(this.getMobileKeyboardInsetEstimate());
             this.scheduleKeyboardFits();
         }, delay);
@@ -325,21 +362,32 @@ export class Terminal extends Component<Props, State> {
 
     initTouchScroll() {
         let touchStartY = 0;
+        let touchLastY = 0;
         const el = this.terminalEl;
         if (!el) return;
         el.addEventListener('touchstart', ((e: TouchEvent) => {
-            if (e.touches.length === 1) touchStartY = e.touches[0].clientY;
+            if (e.touches.length === 1) {
+                touchStartY = e.touches[0].clientY;
+                touchLastY = touchStartY;
+                this.terminalTouchMoved = false;
+            }
         }) as unknown as EventListener, { passive: false });
         el.addEventListener('touchmove', ((e: TouchEvent) => {
             if (e.touches.length === 1) {
-                const deltaY = touchStartY - e.touches[0].clientY;
+                const currentY = e.touches[0].clientY;
+                if (Math.abs(touchStartY - currentY) > 8) {
+                    this.terminalTouchMoved = true;
+                    this.keyboardOpenRequestTime = 0;
+                    this.clearKeyboardFallback();
+                }
+                const deltaY = touchLastY - currentY;
                 if (Math.abs(deltaY) > 8) {
                     const canvas = el.querySelector('.xterm-link-layer + canvas');
                     if (canvas) {
                         const wheelEvent = new WheelEvent('wheel', { deltaY: deltaY * (Math.abs(deltaY) > 30 ? 3 : 1), deltaMode: 0, bubbles: true, cancelable: true });
                         canvas.dispatchEvent(wheelEvent);
                     }
-                    touchStartY = e.touches[0].clientY;
+                    touchLastY = currentY;
                 }
                 if (e.cancelable) e.preventDefault();
             }
@@ -361,6 +409,7 @@ export class Terminal extends Component<Props, State> {
             this.terminalEl.removeEventListener('pointerup', this.onTerminalPointer);
             this.terminalEl.removeEventListener('touchend', this.onTerminalPointer);
         }
+        window.removeEventListener('keydown', this.onGlobalKeyDown, true);
         if (this.viewportResizeObserver) this.viewportResizeObserver.disconnect();
         if (this.viewportFitTimeout) clearTimeout(this.viewportFitTimeout);
         if (this.viewportAnimationFrame) cancelAnimationFrame(this.viewportAnimationFrame);

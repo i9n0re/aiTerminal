@@ -7,10 +7,12 @@
 - Frontend source lives under `html/src`.
 - `html/src/components/terminal/index.tsx` owns the Preact terminal shell, mobile toolbar, sidebar, and xterm mount point.
 - `html/src/components/terminal/xterm/index.ts` wraps xterm.js and WebSocket terminal I/O.
+- The backend tmux window manager commands derive their target from the startup command's `tmux ... -t <target>` and must list/select against that target instead of tmux's implicit current session.
 - `yarn build` in `html/` runs webpack/gulp and regenerates the embedded frontend header at `src/html.h`.
 
 ## Environments
 - Local shell PATH may pick broken Homebrew Node first. Use `PATH=/Users/home/.nvm/versions/node/v24.12.0/bin:$PATH` before frontend yarn commands in this environment.
+- Local rebuilt ttyd is currently served from tmux session `ttyd-8888` on port `8888`, attaching clients to tmux target `gemini`.
 
 ## Important Paths
 - `html/src/components/terminal/index.tsx`
@@ -23,9 +25,12 @@
 - Frontend check: `cd html && PATH=/Users/home/.nvm/versions/node/v24.12.0/bin:$PATH yarn check`
 - Backend configure on macOS: `cmake -S . -B build '-UOPENSSL_*' '-U_OPENSSL_*' '-Upkgcfg_lib__OPENSSL_*' -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"`
 - Backend build: `cmake --build build -j"$(sysctl -n hw.ncpu)"`
+- Current ttyd requires client options as `-t key=value` (example: `-t fontSize=15`).
 
 ## Constraints
 - Keep generated `src/html.h` in sync when frontend changes need to be embedded into ttyd.
 
 ## Preferences
 - Keep memory docs short and factual.
+- Terminal theme background should be pure black (`#000000`).
+- Current xterm font stack is `Monaco,Menlo,Consolas,Liberation Mono,Courier,monospace`.

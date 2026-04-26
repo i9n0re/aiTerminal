@@ -69,6 +69,48 @@ static bool check_host_origin(struct lws *wsi) {
   return len > 0 && strcasecmp(buf, host_buf) == 0;
 }
 
+static bool is_tmux_command(const char *arg) {
+  const char *base = strrchr(arg, '/');
+  return !strcmp(base ? base + 1 : arg, "tmux");
+}
+
+static const char *get_tmux_start_target(void) {
+  for (int i = 0; i < server->argc; i++) {
+    if (!is_tmux_command(server->argv[i])) continue;
+
+    for (int j = i + 1; j < server->argc; j++) {
+      const char *arg = server->argv[j];
+      if (!strcmp(arg, "-t") && j + 1 < server->argc) return server->argv[j + 1];
+      if (!strncmp(arg, "-t=", 3)) return arg + 3;
+      if (!strncmp(arg, "-t", 2) && arg[2] != '\0') return arg + 2;
+    }
+  }
+
+  return NULL;
+}
+
+static char *shell_quote(const char *value) {
+  size_t len = 2;
+  for (const char *p = value; *p != '\0'; p++) {
+    len += *p == '\'' ? 4 : 1;
+  }
+
+  char *quoted = xmalloc(len + 1);
+  char *out = quoted;
+  *out++ = '\'';
+  for (const char *p = value; *p != '\0'; p++) {
+    if (*p == '\'') {
+      memcpy(out, "'\\''", 4);
+      out += 4;
+    } else {
+      *out++ = *p;
+    }
+  }
+  *out++ = '\'';
+  *out = '\0';
+  return quoted;
+}
+
 static pty_ctx_t *pty_ctx_init(struct pss_tty *pss) {
   pty_ctx_t *ctx = xmalloc(sizeof(pty_ctx_t));
   ctx->pss = pss;
@@ -326,20 +368,60 @@ int callback_tty(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
           break;
         case '4':
         case '5': { // TMUX_LIST or TMUX_SELECT command
+          const char *tmux_target = get_tmux_start_target();
+          char *quoted_target = tmux_target != NULL ? shell_quote(tmux_target) : NULL;
+
           if (command == '5' && len > 1) {
-            char select_cmd[128];
             char payload[64];
             size_t payload_len = len - 1 < 63 ? len - 1 : 63;
             memcpy(payload, pss->buffer + 1, payload_len);
             payload[payload_len] = '\0';
-            snprintf(select_cmd, sizeof(select_cmd), "tmux select-window -t %s 2>/dev/null", payload);
-            system(select_cmd);
+
+            bool valid_index = payload[0] != '\0';
+            for (size_t i = 0; payload[i] != '\0'; i++) {
+              if (payload[i] < '0' || payload[i] > '9') {
+                valid_index = false;
+                break;
+              }
+            }
+
+            if (valid_index) {
+              char select_target[256];
+              char *quoted_select_target = NULL;
+              char select_cmd[384];
+
+              if (tmux_target != NULL) {
+                snprintf(select_target, sizeof(select_target), "%s:%s", tmux_target, payload);
+                quoted_select_target = shell_quote(select_target);
+              } else {
+                quoted_select_target = shell_quote(payload);
+              }
+
+              snprintf(select_cmd, sizeof(select_cmd), "tmux select-window -t %s 2>/dev/null", quoted_select_target);
+              system(select_cmd);
+              free(quoted_select_target);
+            }
           }
 
-          system("tmux refresh-client 2>/dev/null");
+          if (quoted_target != NULL) {
+            char refresh_cmd[384];
+            snprintf(refresh_cmd, sizeof(refresh_cmd), "tmux refresh-client -t %s 2>/dev/null", quoted_target);
+            system(refresh_cmd);
+          } else {
+            system("tmux refresh-client 2>/dev/null");
+          }
 
-          // 回归扁平化的窗口查询
-          FILE *fp = popen("tmux list-windows -F \"__TMUX_DATA__:#{window_index}:#{window_name}:#{window_active}\" 2>/dev/null", "r");
+          char list_cmd[512];
+          if (quoted_target != NULL) {
+            snprintf(list_cmd, sizeof(list_cmd),
+                     "tmux list-windows -t %s -F \"__TMUX_DATA__:#{window_index}:#{window_name}:#{window_active}\" 2>/dev/null",
+                     quoted_target);
+          } else {
+            snprintf(list_cmd, sizeof(list_cmd),
+                     "tmux list-windows -F \"__TMUX_DATA__:#{window_index}:#{window_name}:#{window_active}\" 2>/dev/null");
+          }
+
+          FILE *fp = popen(list_cmd, "r");
           if (fp != NULL) {
             char line[256];
             char *full_msg = NULL;
@@ -363,6 +445,7 @@ int callback_tty(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
               free(full_msg);
             }
           }
+          free(quoted_target);
           break;
         }
         case RESIZE_TERMINAL:
